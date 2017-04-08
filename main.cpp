@@ -1,9 +1,6 @@
-#include <QCoreApplication>
-#include <capture.h>
-#include <shift.h>
+#include <flow.h>
 #include <signal.h>
-
-unsigned char Solenoid[16];
+#include <softPwm.h>
 
 void handle_SIGINT(int unused)
 {
@@ -15,15 +12,16 @@ void handle_SIGINT(int unused)
 
 int main(void)
 {
+  unsigned char Solenoid[16];
   unsigned char background[200][320];
   unsigned char frame[200][320];
   unsigned char diff[200][320];
   unsigned char final[200][320];
   unsigned char HI_THRESH = 20;
   unsigned char LO_THRESH = 15;
-
   unsigned int i,q,l;
-
+  int return_value = 0;
+  int PWMsetting   = 0;
   q = 0;
   l = 0;
 
@@ -37,6 +35,9 @@ int main(void)
 
   //Configure Shift Register Output
   InitShiftRegister();
+
+  //Configure PWM modulator
+  softPwmCreate(3,0,100);
 
   // Connect pixy
   return_value = ConnectPixy();
@@ -93,7 +94,7 @@ int main(void)
 
     for(q=0;q<200;q++)
     {
-      for(l=0;l<256;l++)
+      for(l=0;l<320;l++)
       {
         final[q][l] = 0;
       }
@@ -102,7 +103,7 @@ int main(void)
 
     for(q=0;q<200;q++)
     {
-      for(l=0;l<256;l++)
+      for(l=0;l<320;l++)
       {
         x = background[q][l];
         y = frame[q][l];
@@ -113,7 +114,7 @@ int main(void)
     // Mark all pixels above HI_THRESH
     for(q=0;q<200;q++)
     {
-      for(l=0;l<256;l++)
+      for(l=0;l<320;l++)
       {
         x = diff[q][l];
         if(x>HI_THRESH)
@@ -127,14 +128,15 @@ int main(void)
     // with intensity values above LO_THRESH
     for(q=0;q<200;q++)
     {
-      for(l=0;l<256;l++)
+      for(l=0;l<320;l++)
       {
-        x = diff[q][l];
-        if((x==255)        &&
+        x = final[q][l];
+
+        if ((x==255)       &&
            ((q - 1) > 0)   &&
            ((q + 1) < 200) &&
            ((l - 1) > 0)   &&
-           ((l + 1) < 256))
+           ((l + 1) < 320))
         {
           if(diff[q-1][l] > LO_THRESH)
           {
@@ -191,6 +193,47 @@ int main(void)
       }
     }
 
+    //find vertical L-CROM
+    y        = 0;
+    count    = 0;
+    maxCount = 0;
+
+    unsigned char prevY    = 0;
+    unsigned char nextY    = 0;
+    unsigned char Ystart   = 0;
+    unsigned char yLCROM   = 0;
+
+    for(l=0;l<256;l++)
+    {
+      for(q=0;q<200;q++)
+      {
+        y     = final[q][l];
+        prevY = final[q-1][l];
+        nextY = final[q+1][l];
+
+        if( (y == ((char)255)) && (prevY == ((char)0)) )
+        {
+          Ystart = q;
+          count  = 1;
+        }
+        else if((x == ((char)255)) && (nextX == ((char)255)))
+        {
+          count++;
+        }
+        else if((x == ((char)255)) && (nextX == ((char)0)))
+        {
+          if(count > maxCount)
+          {
+            yLCROM   = Ystart;
+            maxCount = count;
+          }
+        }
+      }
+    }
+
+    // using L-CROM to find PWM value
+    PWMsetting = yLCROM/2;
+
     // using L-CROM find solenoid width
     // using L-CROM find solenoid position from right to left
     unsigned char Swid = 0;
@@ -237,6 +280,7 @@ int main(void)
         //printf("%d ", Solenoid[i]);
       }
       UpdateShiftRegister(Solenoid);
+      softPwmWrite(3,PWMsetting);
     }
   }
 
